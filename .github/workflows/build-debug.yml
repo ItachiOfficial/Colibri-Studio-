@@ -135,11 +135,22 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Accept remaining SDK licenses
+        # android-actions/setup-android's accept-android-sdk-licenses (on by
+        # default) did not cover every license on this runner image in practice —
+        # `sdkmanager --licenses` fell back to its interactive "Review licenses
+        # (y/N)?" prompt, which then hung with no TTY and failed the whole SDK
+        # setup step (exit code 1) before the NDK/build steps could even start.
+        # Piping "y" answers explicitly is the same fix `yes | sdkmanager
+        # --licenses` docs recommend for CI and doesn't depend on that action's
+        # internal handling of any particular SDK/license-list version.
+        run: yes | sdkmanager --licenses > /dev/null || true
+
       - name: Install NDK
         env:
           # Keep in sync with mhNdkVersion's default in app/build.gradle.kts.
           NDK_VERSION: "26.1.10909125"
-        run: sdkmanager --install "ndk;${NDK_VERSION}"
+        run: yes | sdkmanager --install "ndk;${NDK_VERSION}"
 
       - name: Cache Gradle
         uses: actions/cache@v4
