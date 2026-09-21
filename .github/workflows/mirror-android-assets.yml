@@ -1,0 +1,85 @@
+# One-off (re-runnable) job: downloads the three large Android build-toolchain
+# assets Mobile Harness currently fetches from a third-party host at build/first-run
+# time, and re-publishes them as assets on a GitHub Release of THIS fork — so the
+# "build & install an APK on-device" feature (see /areas/mobile-harness-fork.md)
+# doesn't silently break if that third party ever reorganizes or takes its site
+# down. Runs on a GitHub-hosted runner specifically so this works from a phone with
+# no PC and no way to download/re-upload ~1-2GB of files directly — the runner does
+# the downloading and uploading, not the person triggering this.
+#
+# This does NOT change what the app itself downloads — see the follow-up code
+# change (ANDROID_ASSET_BASE in RuntimeInstaller.kt) once these assets exist here,
+# to actually point the app at this mirror instead of the original host.
+name: Mirror Android build assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish these assets under"
+        required: true
+        default: "android-assets-mirror-2026.09"
+
+permissions:
+  contents: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download source assets
+        env:
+          BASE_URL: https://appdevforall.org/dev-assets/debug
+        run: |
+          set -euo pipefail
+          mkdir -p mirror
+          cd mirror
+          # -f: fail loudly (non-2xx is a hard error, not a 0-byte "success") —
+          # silently mirroring an error page instead of the real file would be
+          # worse than this job simply failing.
+          for f in android-sdk-arm64-v8a.zip gradle-8.14.3-bin.zip localMvnRepository.zip; do
+            echo "Downloading $f…"
+            curl -fL --retry 3 --retry-delay 5 -o "$f" "$BASE_URL/$f"
+          done
+          echo "Downloaded files:"
+          ls -lh
+
+      - name: Checksum the downloads
+        id: checksums
+        run: |
+          cd mirror
+          sha256sum *.zip | tee ../mirror-checksums.sha256
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — uploading (will overwrite same-named assets)."
+          else
+            gh release create "$TAG" \
+              --title "Android build assets mirror ($TAG)" \
+              --notes "Mirror of the Android SDK/Gradle/Maven assets Mobile Harness downloads for on-device APK builds — see ANDROID_ASSET_BASE in RuntimeInstaller.kt. Re-published here from appdevforall.org/dev-assets/debug so the build-from-mobile feature has a fallback if that host ever changes or disappears. Re-run the 'Mirror Android build assets' workflow to refresh these if the upstream files change."
+          fi
+          gh release upload "$TAG" mirror/*.zip mirror-checksums.sha256 --clobber
+
+      - name: Summary
+        run: |
+          {
+            echo "## Mirrored Android build assets"
+            echo ""
+            echo "Tag: \`${{ github.event.inputs.tag }}\`"
+            echo ""
+            echo "\`\`\`"
+            cat mirror-checksums.sha256
+            echo "\`\`\`"
+            echo ""
+            echo "Next: point ANDROID_ASSET_BASE (RuntimeInstaller.kt) at this release's asset URLs, e.g.:"
+            echo "\`https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.tag }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
