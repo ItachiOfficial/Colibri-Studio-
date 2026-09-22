@@ -25,8 +25,15 @@ val hasUploadSigning = listOf(
     uploadKeyAlias,
     uploadKeyPassword,
 ).all { !it.isNullOrBlank() }
+// Originally techjarves/Mobile-Harness's own release — mirrored to this fork's own
+// GitHub Releases (.github/workflows/mirror-android-assets.yml, mirror-agent-runtime
+// job, run 2026-09-22) for independence from the upstream repo. Verified: the 6
+// pocketdev-*.tar.zst bundle checksums calculated by that mirror run match the
+// sha256 constants already in RuntimeInstaller.kt (CORE/CLAUDE/PYTHON/ANDROID/DSH/AGY
+// _BUNDLE) exactly — same bytes, so no re-signing or re-verification needed, only
+// this URL changes.
 val runtimeReleaseBaseUrl =
-    "https://github.com/techjarves/Mobile-Harness/releases/download/runtime-2026.09.4"
+    "https://github.com/ItachiOfficial/Colibri-Studio-/releases/download/android-assets-mirror-2026.09-agent-runtime"
 val appUpdateManifestUrl =
     "https://github.com/techjarves/Mobile-Harness/releases/latest/download/mobile-harness-update.json"
 val runtimeBundleDir = rootProject.layout.projectDirectory.dir("dist/runtime-bundles")

@@ -1900,7 +1900,10 @@ fi
         private const val AGY_RELEASE_URL = "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.1.27-5211191891591168/linux-arm/cli_linux_arm64.tar.gz"
         private const val AGY_RELEASE_SHA512 = "ed45f6930785aa4b42f14e07ace1c9d91a94fb76e760f54acbd7d3d3951e1f957fd456a0dae2a3124dd9a3b689bf7afb7c9303a3e4ba95037fc10063424d9bf9"
         private const val GITHUB_CLI_VERSION = "2.100.0"
-        private const val GITHUB_CLI_RELEASE_URL = "https://github.com/cli/cli/releases/download/v2.100.0/gh_2.100.0_linux_arm64.tar.gz"
+        // Originally cli/cli's own release — mirrored (2026-09-22) alongside the
+        // pocketdev-*.tar.zst bundles above; checksum confirmed identical
+        // (GITHUB_CLI_RELEASE_SHA256 below unchanged), so only the host changes.
+        private const val GITHUB_CLI_RELEASE_URL = "https://github.com/ItachiOfficial/Colibri-Studio-/releases/download/android-assets-mirror-2026.09-agent-runtime/gh_2.100.0_linux_arm64.tar.gz"
         private const val GITHUB_CLI_RELEASE_SHA256 = "ea4e7a581a32ccad6cc7923cb1576ac5859ba4b9a16ab22eb8f8a96e78e2e961"
         private const val LEGACY_README = "# Pocket Dev project\n\nThis project is managed locally on Android.\n"
         private const val LEGACY_INDEX = "<!doctype html><title>Pocket Dev</title><h1>Hello from Android</h1>\n"
@@ -1914,7 +1917,15 @@ fi
         private const val LEGACY_CORE_TOOLS_VERSION = "core-bundle-2026.09.4"
         private const val SYSTEM_UPGRADE_VERSION = "ubuntu-maintenance-v1"
         private const val ANDROID_TOOLS_VERSION = "sdk36-build-tools35-gradle8.14.3-maven-2026.09"
-        private const val ANDROID_ASSET_BASE = "https://appdevforall.org/dev-assets/debug"
+        // Originally https://appdevforall.org/dev-assets/debug — moved to a mirror on
+        // this fork's own GitHub Releases (see .github/workflows/mirror-android-assets.yml,
+        // run 2026-09-21) so the on-device APK build/install feature doesn't silently
+        // break if that third-party host is ever reorganized or taken down. The
+        // SHA-256 checksums below are unchanged: the mirrored files are byte-for-byte
+        // identical to the ones this code already verified against (confirmed against
+        // the mirror workflow's own checksum output), so re-pointing the URL alone is
+        // sufficient — no re-signing or re-verification of trust needed.
+        private const val ANDROID_ASSET_BASE = "https://github.com/ItachiOfficial/Colibri-Studio-/releases/download/android-assets-mirror-2026.09"
         private const val ANDROID_SDK_URL = "$ANDROID_ASSET_BASE/android-sdk-arm64-v8a.zip"
         private const val ANDROID_SDK_SHA256 = "bfe5bc940a7ede14735817a40962256666ce4152b9f3135f34a4ab9bccb87c3f"
         private const val ANDROID_GRADLE_URL = "$ANDROID_ASSET_BASE/gradle-8.14.3-bin.zip"
