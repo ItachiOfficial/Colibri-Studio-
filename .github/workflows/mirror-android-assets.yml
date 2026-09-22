@@ -83,3 +83,99 @@ jobs:
             echo "Next: point ANDROID_ASSET_BASE (RuntimeInstaller.kt) at this release's asset URLs, e.g.:"
             echo "\`https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.tag }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  mirror-agent-runtime:
+    # Same idea as the `mirror` job above, for the rest of what this fork depends
+    # on from hosts it doesn't control:
+    #   - The 6 pocketdev-*.tar.zst bundles (Claude Code, DeepSeek Harness, Python,
+    #     core rootfs overlay, agy overlay, android overlay) — from GitHub Releases
+    #     of the UPSTREAM repo (techjarves/Mobile-Harness), not this fork. If the
+    #     original author ever deletes that release, agent installs break.
+    #   - Antigravity CLI — from Google's own storage bucket.
+    #   - GitHub CLI — from the official cli/cli releases.
+    #   - Ubuntu base rootfs — from Ubuntu's own cdimage mirror.
+    # None of these are as likely to disappear as a personal dev-assets folder, but
+    # "not as likely" isn't "won't happen", and mirroring them costs little once the
+    # download infrastructure already exists in this same workflow.
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download upstream agent/runtime assets
+        run: |
+          set -euo pipefail
+          mkdir -p mirror2
+          cd mirror2
+
+          UPSTREAM_RUNTIME_BASE="https://github.com/techjarves/Mobile-Harness/releases/download/runtime-2026.09.4"
+          for f in \
+            pocketdev-core-arm64-2026.09.5.tar.zst \
+            pocketdev-claude-arm64-2026.09.1.tar.zst \
+            pocketdev-python-arm64-2026.09.2.tar.zst \
+            pocketdev-android-arm64-2026.09.1.tar.zst \
+            pocketdev-dsh-arm64-2026.09.1.tar.zst \
+            pocketdev-agy-arm64-2026.09.1.tar.zst; do
+            echo "Downloading $f…"
+            curl -fL --retry 3 --retry-delay 5 -o "$f" "$UPSTREAM_RUNTIME_BASE/$f"
+          done
+
+          echo "Downloading Antigravity CLI…"
+          curl -fL --retry 3 --retry-delay 5 -o cli_linux_arm64.tar.gz \
+            "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.1.27-5211191891591168/linux-arm/cli_linux_arm64.tar.gz"
+
+          echo "Downloading GitHub CLI…"
+          curl -fL --retry 3 --retry-delay 5 -o gh_2.100.0_linux_arm64.tar.gz \
+            "https://github.com/cli/cli/releases/download/v2.100.0/gh_2.100.0_linux_arm64.tar.gz"
+
+          echo "Downloading Ubuntu base rootfs…"
+          curl -fL --retry 3 --retry-delay 5 -o ubuntu-base-20.04-base-arm64.tar.gz \
+            "https://cdimage.ubuntu.com/ubuntu-base/releases/20.04/release/ubuntu-base-20.04.5-base-arm64.tar.gz"
+
+          echo "Downloaded files:"
+          ls -lh
+
+      - name: Checksum and verify against what RuntimeInstaller.kt expects
+        run: |
+          cd mirror2
+          sha256sum * | tee ../mirror2-checksums.sha256
+          echo ""
+          echo "Compare this output by hand against the sha256/sha512 constants in"
+          echo "RuntimeInstaller.kt (CORE_BUNDLE, CLAUDE_BUNDLE, PYTHON_BUNDLE,"
+          echo "ANDROID_BUNDLE, DSH_BUNDLE, AGY_BUNDLE, GITHUB_CLI_RELEASE_SHA256,"
+          echo "AGY_RELEASE_SHA512, ROOTFS_SHA256 or similar) before repointing any URL —"
+          echo "same reasoning as the Android-assets job: only safe to switch the source"
+          echo "if the bytes are confirmed identical to what the app already trusts."
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag }}-agent-runtime
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — uploading (will overwrite same-named assets)."
+          else
+            gh release create "$TAG" \
+              --title "Agent + runtime assets mirror ($TAG)" \
+              --notes "Mirror of the Claude Code / DeepSeek Harness / Python / rootfs / Antigravity CLI / GitHub CLI / Ubuntu base rootfs assets this fork depends on from hosts outside this repo's control. See RuntimeInstaller.kt (RUNTIME_RELEASE_BASE_URL, AGY_RELEASE_URL, GITHUB_CLI_RELEASE_URL, ROOTFS_URL). Re-run the 'mirror-agent-runtime' job to refresh if upstream versions change — remember to update the version numbers baked into this workflow's download URLs first."
+          fi
+          gh release upload "$TAG" mirror2/* mirror2-checksums.sha256 --clobber
+
+      - name: Summary
+        run: |
+          {
+            echo "## Mirrored agent/runtime assets"
+            echo ""
+            echo "Tag: \`${{ github.event.inputs.tag }}-agent-runtime\`"
+            echo ""
+            echo "\`\`\`"
+            cat mirror2-checksums.sha256
+            echo "\`\`\`"
+            echo ""
+            echo "Next: verify each checksum above matches the corresponding constant in"
+            echo "RuntimeInstaller.kt, then repoint RUNTIME_RELEASE_BASE_URL"
+            echo "(app/build.gradle.kts), AGY_RELEASE_URL, and GITHUB_CLI_RELEASE_URL at:"
+            echo "\`https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.tag }}-agent-runtime\`"
+          } >> "$GITHUB_STEP_SUMMARY"
