@@ -1,0 +1,229 @@
+# Compiles the app on every push/PR so a real Gradle+AGP+NDK toolchain catches
+# anything the static checks done during development (brace/paren balance,
+# import/type review) cannot — neither of those substitutes for an actual build.
+# See /areas/mobile-harness-fork.md: as of writing, nothing in this fork had ever
+# been compiled with real Gradle. This workflow is meant to close that gap.
+#
+# Targets `online` + `debug` deliberately:
+#   - online: does not require the offline runtime-bundle assets (large binary
+#     downloads unrelated to whether the Kotlin/C++ source compiles) — see the
+#     productFlavors block in app/build.gradle.kts.
+#   - debug: does not require release signing (MH_UPLOAD_* secrets) or Play
+#     readiness checks, both of which are correctly optional in build.gradle.kts
+#     but out of scope for "does the code compile".
+name: Build debug APK
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  # The unzip job commits and pushes the extracted tree back to the repo — needs
+  # write access. If your repo's Settings → Actions → General has "Read repository
+  # contents permission" as the default (not "Read and write"), that default
+  # overrides this unless this block is here explicitly.
+  contents: write
+
+jobs:
+  unzip:
+    # For pushing from a phone with no unzip/terminal available: drop the repo's
+    # zip export (e.g. Mobile-Harness-main.zip, as produced by the project chat)
+    # straight into the repo root via GitHub's mobile "Add file → Upload files",
+    # commit, and this job extracts it into a real file tree and commits that —
+    # no local unzip step needed. A no-op on every other push (the glob simply
+    # matches nothing), so it's safe to leave in place permanently.
+    #
+    # Note this can only run once the workflow file itself already exists in the
+    # repo (.github/workflows/build-debug.yml, uploaded as its own file, not
+    # bundled inside the zip) — a workflow can't retroactively act on the very
+    # push that first introduces it.
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    outputs:
+      unzipped: ${{ steps.check.outputs.found }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for an uploaded zip
+        id: check
+        run: |
+          shopt -s nullglob
+          zips=(*.zip)
+          if [ ${#zips[@]} -eq 0 ]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No zip at repo root — nothing to extract."
+            exit 0
+          fi
+          echo "found=true" >> "$GITHUB_OUTPUT"
+          echo "zip_name=${zips[0]}" >> "$GITHUB_ENV"
+          echo "Found ${zips[0]}"
+
+      - name: Extract and merge into the repo
+        if: steps.check.outputs.found == 'true'
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d)
+          unzip -q "$zip_name" -d "$work"
+          # Mobile-Harness-main.zip (as produced by the project chat) wraps
+          # everything in one top-level Mobile-Harness-main/ folder — unwrap that
+          # one level so files land at the repo root, matching what a normal
+          # `git clone` checkout would look like. If the zip has no single
+          # top-level folder (already flat), copy it as-is instead.
+          entries=("$work"/*)
+          if [ ${#entries[@]} -eq 1 ] && [ -d "${entries[0]}" ]; then
+            src="${entries[0]}"
+          else
+            src="$work"
+          fi
+          # Never let extracted content overwrite the workflow that just ran this,
+          # or re-introduce the zip itself into history.
+          rm -rf "$src/.github" "$src"/*.zip
+          cp -a "$src/." .
+          rm -f "$zip_name"
+          rm -rf "$work"
+
+      - name: Commit extracted tree
+        if: steps.check.outputs.found == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Nothing changed after extraction."
+          else
+            git commit -m "Extract $zip_name [skip ci]"
+            git push
+          fi
+
+  build:
+    needs: unzip
+    # Skip the actual build on the extraction commit itself — the extraction
+    # step's own push (with "[skip ci]") already avoids re-triggering this
+    # workflow, but if unzip ran and found nothing to do, still proceed to build
+    # whatever is already in the repo.
+    if: always() && !cancelled() && !failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          # third_party/proot and third_party/libandroid-shmem are git submodules
+          # (see .gitmodules) that the native build depends on — a shallow
+          # checkout without this silently produces an empty third_party/ and a
+          # confusing CMake failure far from the real cause.
+          submodules: recursive
+          # Pick up the extraction commit unzip just pushed, not the stale zip
+          # commit this run originally triggered on.
+          ref: ${{ github.ref }}
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # Second, distinct failure found in the same step after the licenses
+          # fix: this action's default `packages` input is "tools platform-tools",
+          # but Google removed the standalone "tools" package from the SDK
+          # repository years ago — sdkmanager now reports "Failed to find package
+          # 'tools'" and exits 1 even with every license accepted. Explicitly
+          # requesting only platform-tools (what Gradle/AGP actually needs; it
+          # fetches the real compileSdk platform and build-tools itself) skips
+          # that obsolete package entirely. Documented fix per the action's own
+          # README ("packages" input, empty/custom value).
+          packages: platform-tools
+
+      - name: Accept remaining SDK licenses
+        # android-actions/setup-android's accept-android-sdk-licenses (on by
+        # default) did not cover every license on this runner image in practice —
+        # `sdkmanager --licenses` fell back to its interactive "Review licenses
+        # (y/N)?" prompt, which then hung with no TTY and failed the whole SDK
+        # setup step (exit code 1) before the NDK/build steps could even start.
+        # Piping "y" answers explicitly is the same fix `yes | sdkmanager
+        # --licenses` docs recommend for CI and doesn't depend on that action's
+        # internal handling of any particular SDK/license-list version.
+        run: yes | sdkmanager --licenses > /dev/null || true
+
+      - name: Install NDK
+        env:
+          # Keep in sync with mhNdkVersion's default in app/build.gradle.kts.
+          NDK_VERSION: "26.1.10909125"
+        run: yes | sdkmanager --install "ndk;${NDK_VERSION}"
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          # Bust the cache on wrapper/build-script changes; Gradle handles the
+          # rest of its own incrementality within a cache hit.
+          key: gradle-${{ runner.os }}-${{ hashFiles('gradle/wrapper/gradle-wrapper.properties', '**/*.gradle.kts') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Grant execute permission to gradlew
+        run: chmod +x gradlew
+
+      - name: Stub runtime bundle assets
+        # app/build.gradle.kts's prepareBundledAgentAssets Sync task (which every
+        # merge*Assets task depends on, `online` included) copies files from
+        # dist/runtime-bundles/ — real ones are 500MB+ binaries hosted separately
+        # on appdevforall.org and downloaded by the app itself at runtime, not
+        # part of this repo and not needed to prove the Kotlin/C++ source
+        # compiles. Empty placeholders satisfy the Sync task's file-exists check
+        # without pulling real payloads into CI.
+        run: |
+          mkdir -p dist/runtime-bundles
+          for f in \
+            pocketdev-agy-arm64-2026.09.1.tar.zst \
+            pocketdev-core-arm64-2026.09.5.tar.zst \
+            pocketdev-claude-arm64-2026.09.1.tar.zst \
+            pocketdev-python-arm64-2026.09.2.tar.zst \
+            pocketdev-android-arm64-2026.09.1.tar.zst \
+            pocketdev-dsh-arm64-2026.09.1.tar.zst; do
+            [ -f "dist/runtime-bundles/$f" ] || touch "dist/runtime-bundles/$f"
+          done
+
+      - name: Build online debug APK
+        # No secrets configured on purpose — test-secrets.properties and the
+        # MH_UPLOAD_* release-signing env vars are both optional in
+        # build.gradle.kts (see hasUploadSigning / testSecrets). If this build
+        # ever starts requiring them, that's itself worth knowing about.
+        run: ./gradlew assembleOnlineDebug --stacktrace --no-daemon
+
+      - name: Upload APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-harness-online-debug
+          # Non-fatal if the build failed and produced nothing — the workflow's
+          # own failure status is what signals that, not a missing-artifact error
+          # on top of it.
+          if-no-files-found: ignore
+          path: app/build/outputs/apk/online/debug/*.apk
+          retention-days: 14
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-build-reports
+          if-no-files-found: ignore
+          path: |
+            app/build/reports
+            **/build/tmp/**/*.log
+          retention-days: 14
