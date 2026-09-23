@@ -26,6 +26,16 @@ set_target_properties(talloc PROPERTIES OUTPUT_NAME talloc SOVERSION 2)
 add_library(android-shmem SHARED "${SHM_ROOT}/shmem.c")
 target_include_directories(android-shmem PUBLIC "${SHM_ROOT}")
 target_compile_definitions(android-shmem PRIVATE _PATH_TMP="/data/data/com.jarves.mh/cache/")
+# shmem.c calls open() without including fcntl.h itself — this compiled fine with
+# older/more permissive C compilers (implicit function declarations used to be a
+# warning, not an error) but current NDK Clang enforces C99+ strictly and fails
+# the build outright. Same forced-include pattern the `proot` target below
+# already uses for its own missing-header gaps (SHELL:-include string.h) — fixing
+# it at the CMake level instead of patching third_party/libandroid-shmem's
+# source directly, since that source is a git submodule re-cloned fresh on every
+# CI run (see .github/workflows/build-debug.yml's "Populate git submodules"
+# step) and any local edit to it would be silently discarded on the next run.
+target_compile_options(android-shmem PRIVATE "SHELL:-include fcntl.h")
 target_link_libraries(android-shmem PRIVATE log android)
 
 set(PROOT_SOURCES
