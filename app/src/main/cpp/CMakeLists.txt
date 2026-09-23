@@ -119,6 +119,13 @@ target_compile_options(proot PRIVATE
     -Wall -Wextra -O2
     "SHELL:-include string.h"
     "SHELL:-include ${SHM_ROOT}/shm.h"
+    # src/syscall/enter.c calls getifaddrs()/freeifaddrs() without including
+    # ifaddrs.h itself — same implicit-function-declaration class of error as
+    # android-shmem's missing fcntl.h above (current NDK Clang enforces C99+
+    # strictly), same fix at the same level for the same reason: this source
+    # is a git submodule re-cloned on every CI run, not something to patch
+    # in place.
+    "SHELL:-include ifaddrs.h"
 )
 target_link_options(proot PRIVATE "-Wl,-z,noexecstack")
 target_link_libraries(proot PRIVATE talloc android-shmem)
