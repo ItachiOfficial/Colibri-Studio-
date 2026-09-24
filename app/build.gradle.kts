@@ -78,17 +78,18 @@ android {
 
     defaultConfig {
         applicationId = "com.jarves.mh"
-        // Was 28 (Android 9) — no code in this project actually requires it: every
-        // Build.VERSION_CODES.P+ API call already has a working else-branch for
-        // older versions (see AppUpdater.kt's PackageManager.GET_SIGNATURES
-        // fallback), and PRoot's own Android port only documents a hard floor
-        // around API 21 (ANDROID_PRE5 build variable, termux/proot fork notes).
-        // Lowered to unblock installing on Android 8.1 (API 27) devices — see
-        // /areas/mobile-harness-fork.md. This has NOT been verified by actually
-        // running the app on an API 21-27 device; if PRoot, the NDK toolchain, or
-        // something else misbehaves below 28 in practice, that would only show up
-        // there, not at compile time.
-        minSdk = 21
+        // Was 28 (Android 9), briefly tried 21 — corrected to 24 after CI actually
+        // caught the real constraint: minSdk drives the NDK's --target=...androidNN
+        // for every native compile, and third_party/proot/src/syscall/enter.c calls
+        // getifaddrs()/freeifaddrs(), which Bionic (Android's libc) only declares
+        // for API 24+ (__INTRODUCED_IN(24) in ifaddrs.h — confirmed against
+        // Android's own bionic source). At API 21 those prototypes vanish entirely
+        // and the native build fails outright, which is exactly what happened.
+        // 24 (Android 7.0) is the true floor for this codebase as it stands; it
+        // still comfortably covers the Android 8.1 (API 27) device this was
+        // originally lowered for — see /areas/mobile-harness-fork.md. Confirmed by
+        // an actual failing CI build, not just static reasoning this time.
+        minSdk = 24
         // The direct APK retains the proven target-28 PRoot execution path. The
         // Play build targets current Android while its runtime path is validated.
         targetSdk = if (playBuild) 36 else 28

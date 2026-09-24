@@ -119,13 +119,11 @@ target_compile_options(proot PRIVATE
     -Wall -Wextra -O2
     "SHELL:-include string.h"
     "SHELL:-include ${SHM_ROOT}/shm.h"
-    # src/syscall/enter.c calls getifaddrs()/freeifaddrs() without including
-    # ifaddrs.h itself — same implicit-function-declaration class of error as
-    # android-shmem's missing fcntl.h above (current NDK Clang enforces C99+
-    # strictly), same fix at the same level for the same reason: this source
-    # is a git submodule re-cloned on every CI run, not something to patch
-    # in place.
-    "SHELL:-include ifaddrs.h"
+    # NOT "-include ifaddrs.h": that was tried first for enter.c's
+    # getifaddrs()/freeifaddrs() calls, but the real cause was minSdk=21 pushing
+    # the NDK target below Bionic's __INTRODUCED_IN(24) for those functions — the
+    # header includes fine either way, its declarations just don't exist below
+    # API 24. Fixed at the actual source (minSdk, app/build.gradle.kts) instead.
 )
 target_link_options(proot PRIVATE "-Wl,-z,noexecstack")
 target_link_libraries(proot PRIVATE talloc android-shmem)
