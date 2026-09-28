@@ -3899,6 +3899,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val project = _state.value.activeProject ?: return
         val chatId = _state.value.activeChatId ?: return
         val now = System.currentTimeMillis()
+        val wasUntitled = _state.value.projectChats.firstOrNull { it.id == chatId }?.title == "New chat"
         val title = prompt.replace(Regex("\\s+"), " ").trim().let {
             if (it.length <= 42) it else it.take(39).trimEnd() + "…"
         }
@@ -3914,6 +3915,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             current.copy(projectChats = chats)
         }
         preferences.saveProjectChats(project.id, _state.value.projectChats)
+        // A quick project is a single conversation: name it after its first message so the
+        // chat drawer shows something readable instead of the generated name.
+        if (wasUntitled && project.kind == ProjectKind.QUICK_PROJECT && title.isNotBlank()) {
+            renameProject(project.id, title)
+        }
     }
 
     companion object {

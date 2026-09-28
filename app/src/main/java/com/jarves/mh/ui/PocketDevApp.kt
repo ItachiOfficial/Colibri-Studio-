@@ -76,6 +76,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Android
@@ -134,6 +136,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
@@ -249,6 +255,11 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val projectsListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
+    // Settings and the project list / import screen are no longer a bottom-nav root:
+    // they open from the chat drawer as full-screen overlays.
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showProjects by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(state.activeProject?.id) { showProjects = false }
     LaunchedEffect(state.toastMessage) {
         state.toastMessage?.let { message ->
             Toast.makeText(context, message, Toast.LENGTH_LONG).show()
@@ -329,6 +340,71 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onSwitchChat = viewModel::switchReadOnlyChat,
             onContinueHere = viewModel::activateReadOnlyProject,
         )
+        showSettings -> {
+            BackHandler { showSettings = false }
+            SettingsScreen(
+                    state = state,
+                    onSaveProvider = { profile, key ->
+                        viewModel.updateProvider(profile, key)
+                    },
+                    onDiscoverModels = viewModel::discoverModels,
+                    onValidateProvider = viewModel::validateProvider,
+                    onSetThemeMode = viewModel::setThemeMode,
+                    onSetConfirmRiskyCommands = viewModel::setConfirmRiskyCommands,
+                    onSetStitchApiKey = viewModel::setStitchApiKey,
+                    onClearStitchApiKey = viewModel::clearStitchApiKey,
+                    onPing = viewModel::pingApi,
+                    onClearTerminal = viewModel::clearTerminal,
+                    getSavedApiKey = viewModel::getSavedApiKey,
+                    getSavedApiKeys = viewModel::getSavedApiKeys,
+                    onAddApiKey = viewModel::addApiKey,
+                    onActivateApiKey = viewModel::activateApiKey,
+                    onRemoveApiKey = viewModel::removeApiKey,
+                    onInstallDevStack = viewModel::installDevStack,
+                    onRemoveDevStack = viewModel::removeDevStack,
+                    onInstallAgent = viewModel::installAgent,
+                    onCheckAgentUpdates = viewModel::checkAgentUpdates,
+                    onUpdateAgent = viewModel::updateAgent,
+                    onStartAntigravityLogin = viewModel::startAntigravityLogin,
+                    onSubmitAntigravityCode = viewModel::submitAntigravityCode,
+                    onLogoutAntigravity = viewModel::logoutAntigravity,
+                    onRefreshAntigravityModels = viewModel::refreshAntigravityModels,
+                    onSetAntigravityModel = viewModel::setAntigravityModel,
+                    onSetAntigravityEffort = viewModel::setAntigravityEffort,
+                    initialDebugUpdateManifestUrl = viewModel.debugUpdateManifestUrl(),
+                    onSetDebugUpdateManifestUrl = viewModel::setDebugUpdateManifestUrl,
+                    onClearDebugUpdateManifestUrl = viewModel::clearDebugUpdateManifestUrl,
+                )
+        }
+        showProjects -> {
+            BackHandler { showProjects = false }
+            ProjectsScreen(
+                    state = state,
+                    listState = projectsListState,
+                    onOpen = { project ->
+                showProjects = false
+                viewModel.openProject(project)
+            },
+                    onCreate = viewModel::createProject,
+                    onCreateQuickProject = viewModel::createQuickProject,
+                    onImportZip = viewModel::importZipProject,
+                    onCloneGit = viewModel::clonePublicGitRepository,
+                    onStartGitHubLogin = viewModel::startGitHubLogin,
+                    onGenerateNewGitHubCode = viewModel::generateNewGitHubCode,
+                    onRefreshGitHub = viewModel::refreshGitHubRepositories,
+                    onDisconnectGitHub = viewModel::disconnectGitHub,
+                    onCloneGitHub = viewModel::cloneGitHubRepository,
+                    onRenameProject = viewModel::renameProject,
+                    onDeleteProject = viewModel::deleteProject,
+                    onSettings = {
+                showProjects = false
+                showSettings = true
+            },
+                    onPing = viewModel::pingApi,
+                    onToggleTheme = viewModel::toggleTheme,
+                    onInstallUpdate = viewModel::installAppUpdate,
+                )
+        }
         state.activeProject != null && state.workspaceVisible && state.stitchPreviewOpen -> StitchPreviewScreen(
             preview = state.stitchPreview,
             onClose = viewModel::closeStitchPreview,
@@ -373,8 +449,24 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onOpenAttachment = viewModel::openChatAttachment,
             onBuildAndRunAndroid = viewModel::buildAndRunAndroidApp,
             onOpenStitchPreview = viewModel::openStitchPreview,
+            onOpenProjects = { showProjects = true },
+            onOpenSettings = { showSettings = true },
+            onCreateQuickProject = viewModel::createQuickProject,
+            onOpenProject = viewModel::openProject,
         )
-        else -> RootScreenHost(state, viewModel, projectsListState)
+        else -> {
+            // No project is open. The app always lands on a chat: reopen the most recently
+            // used project, or start a new empty conversation when there is none.
+            LaunchedEffect(Unit) {
+                val last = state.projects.maxByOrNull { it.updatedAtMillis }
+                if (last != null) viewModel.openProject(last) else viewModel.createQuickProject()
+            }
+            StartupLoadingScreen(
+                state = state,
+                themeMode = state.themeMode,
+                onToggleTheme = viewModel::toggleTheme,
+            )
+        }
     }
 }
 
@@ -3863,8 +3955,19 @@ private fun WorkspaceScreen(
     onOpenAttachment: (ChatAttachment) -> Unit,
     onBuildAndRunAndroid: (autoFix: Boolean) -> Unit,
     onOpenStitchPreview: () -> Unit,
+    onOpenProjects: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onCreateQuickProject: () -> Unit,
+    onOpenProject: (Project) -> Unit,
 ) {
-    BackHandler(onBack = onBack)
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val drawerScope = rememberCoroutineScope()
+    var showExitConfirm by rememberSaveable { mutableStateOf(false) }
+    // Back no longer closes the project (that would land on the launcher branch and reopen it):
+    // it closes the drawer first, then asks before leaving the app.
+    BackHandler(onBack = {
+        if (drawerState.isOpen) drawerScope.launch { drawerState.close() } else showExitConfirm = true
+    })
     val context = LocalContext.current
     val isAndroidProject = state.androidProjectDetected
     val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
@@ -3953,22 +4056,18 @@ private fun WorkspaceScreen(
         return
     }
 
-    if (showChats) {
-        ChatSwitcherDialog(
-            chats = state.projectChats,
-            activeChatId = state.activeChatId,
-            switchingEnabled = !state.isRunning,
-            onDismiss = { showChats = false },
-            onCreate = {
-                onCreateChat()
-                showChats = false
-                selectedTab = WorkspaceTab.CHAT
+    if (showExitConfirm) {
+        AlertDialog(
+            onDismissRequest = { showExitConfirm = false },
+            title = { Text("Quitter l'app ?") },
+            text = { Text("Ta conversation reste sauvegardée, tu pourras la reprendre à tout moment.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showExitConfirm = false
+                    (context as? android.app.Activity)?.finish()
+                }) { Text("Quitter") }
             },
-            onSwitch = { chatId ->
-                onSwitchChat(chatId)
-                showChats = false
-                selectedTab = WorkspaceTab.CHAT
-            },
+            dismissButton = { TextButton(onClick = { showExitConfirm = false }) { Text("Annuler") } },
         )
     }
     state.pendingTerminalCommand?.let { command ->
@@ -3977,6 +4076,24 @@ private fun WorkspaceScreen(
     state.pendingManualTerminalCommand?.let { command ->
         DestructiveCommandDialog(command, onConfirm = onManualTerminalConfirm, onCancel = onManualTerminalCancel)
     }
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        gesturesEnabled = true,
+        drawerContent = {
+            ProjectDrawerContent(
+                projects = state.projects,
+                activeProjectId = state.activeProject?.id,
+                switchingEnabled = !state.isRunning,
+                newConversationEnabled = !state.isRunning &&
+                    !(state.activeProject?.kind == ProjectKind.QUICK_PROJECT && state.messages.isEmpty()),
+                onNewConversation = onCreateQuickProject,
+                onOpenProject = onOpenProject,
+                onOpenProjects = onOpenProjects,
+                onOpenSettings = onOpenSettings,
+                onClose = { drawerScope.launch { drawerState.close() } },
+            )
+        },
+    ) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -4002,7 +4119,7 @@ private fun WorkspaceScreen(
                         )
                     }
                 },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Projects") } },
+                navigationIcon = { IconButton(onClick = { drawerScope.launch { drawerState.open() } }) { Icon(Icons.Default.Menu, "Menu") } },
                 actions = {
                     if (isAndroidProject) {
                         val buildEnabled = !state.androidBuildRunning && !state.isRunning && !state.projectTerminalRunning
@@ -4043,7 +4160,6 @@ private fun WorkspaceScreen(
                         }
                     }
                     IconButton(onClick = onOpenStitchPreview) { Icon(Icons.Default.Palette, "Design preview") }
-                    IconButton(onClick = { showChats = true }) { Icon(Icons.Default.History, "Project chats") }
                     if (state.isRunning) CircularProgressIndicator(Modifier.padding(12.dp).size(20.dp), strokeWidth = 2.dp)
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
@@ -4162,6 +4278,156 @@ private fun WorkspaceScreen(
                 WorkspaceTab.PREVIEW -> PreviewTab(state.previewReady, state.previewUrl)
             }
         }
+    }
+    }
+}
+
+/**
+ * Chat drawer: one conversation = one project (see the product decision). Lists the projects
+ * newest-first, grouped "today" / "earlier", with entries for the project list + import
+ * (ZIP / Git / GitHub) and for Settings.
+ */
+@Composable
+private fun ProjectDrawerContent(
+    projects: List<Project>,
+    activeProjectId: String?,
+    switchingEnabled: Boolean,
+    newConversationEnabled: Boolean,
+    onNewConversation: () -> Unit,
+    onOpenProject: (Project) -> Unit,
+    onOpenProjects: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onClose: () -> Unit,
+) {
+    val now = System.currentTimeMillis()
+    val dayMillis = 24L * 60L * 60L * 1000L
+    val sorted = remember(projects) { projects.sortedByDescending { it.updatedAtMillis } }
+    val recent = sorted.filter { now - it.updatedAtMillis < dayMillis }
+    val earlier = sorted.filter { now - it.updatedAtMillis >= dayMillis }
+
+    ModalDrawerSheet(modifier = Modifier.fillMaxWidth(0.84f)) {
+        Column(Modifier.fillMaxSize()) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 16.dp)
+                    .clickable {
+                        if (newConversationEnabled) onNewConversation()
+                        onClose()
+                    },
+                shape = RoundedCornerShape(13.dp),
+                color = PocketGreen.copy(alpha = if (newConversationEnabled) 0.14f else 0.07f),
+                border = BorderStroke(1.dp, PocketGreen.copy(alpha = 0.35f)),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Default.Add, null, tint = PocketGreen, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Text("Nouvelle conversation", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = PocketGreen)
+                }
+            }
+
+            LazyColumn(
+                modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(1.dp),
+            ) {
+                if (recent.isNotEmpty()) {
+                    item { DrawerSectionLabel("Aujourd'hui") }
+                    items(recent, key = { it.id }) { project ->
+                        DrawerProjectRow(project, project.id == activeProjectId, switchingEnabled) {
+                            if (project.id != activeProjectId) onOpenProject(project)
+                            onClose()
+                        }
+                    }
+                }
+                if (earlier.isNotEmpty()) {
+                    item { DrawerSectionLabel("Précédentes") }
+                    items(earlier, key = { it.id }) { project ->
+                        DrawerProjectRow(project, project.id == activeProjectId, switchingEnabled) {
+                            if (project.id != activeProjectId) onOpenProject(project)
+                            onClose()
+                        }
+                    }
+                }
+                if (!switchingEnabled) {
+                    item {
+                        Text(
+                            "Termine la tâche en cours avant de changer de conversation.",
+                            fontSize = 11.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+            DrawerFooterRow(Icons.Default.FolderOpen, "Projets et import (ZIP, Git, GitHub)") {
+                onOpenProjects()
+                onClose()
+            }
+            DrawerFooterRow(Icons.Default.Settings, "Réglages") {
+                onOpenSettings()
+                onClose()
+            }
+        }
+    }
+}
+
+@Composable
+private fun DrawerSectionLabel(text: String) {
+    Text(
+        text.uppercase(),
+        fontSize = 10.5.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 0.5.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 10.dp, top = 14.dp, bottom = 4.dp),
+    )
+}
+
+@Composable
+private fun DrawerProjectRow(
+    project: Project,
+    isActive: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().clickable(enabled = enabled || isActive, onClick = onClick),
+        shape = RoundedCornerShape(11.dp),
+        color = if (isActive) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent,
+    ) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 11.dp)) {
+            Text(
+                project.name,
+                fontSize = 14.sp,
+                fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                project.formattedUpdatedAt,
+                fontSize = 11.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DrawerFooterRow(icon: ImageVector, label: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = PocketGreen, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(12.dp))
+        Text(label, fontSize = 13.sp, fontWeight = FontWeight.Medium)
     }
 }
 
