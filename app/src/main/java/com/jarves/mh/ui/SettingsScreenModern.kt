@@ -110,7 +110,7 @@ import com.jarves.mh.ui.theme.AppThemeMode
 import com.jarves.mh.ui.theme.PocketOrange
 import kotlinx.coroutines.launch
 
-private enum class SettingsSection { APPEARANCE, TOOLS, RUNTIME, UPDATE_CHANNEL }
+private enum class SettingsSection { APPEARANCE, TOOLS, ANTIGRAVITY, RUNTIME, UPDATE_CHANNEL }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -148,6 +148,7 @@ fun SettingsScreen(
     val context = LocalContext.current
     var expanded by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
     var terminalCleared by remember { mutableStateOf(false) }
+    var antigravityCode by rememberSaveable { mutableStateOf("") }
     var showReliabilityHelp by rememberSaveable { mutableStateOf(false) }
     var stackPendingRemoval by remember { mutableStateOf<DevStack?>(null) }
 
@@ -243,7 +244,7 @@ fun SettingsScreen(
                     expanded = expanded == SettingsSection.TOOLS,
                     onClick = { toggle(SettingsSection.TOOLS) },
                 ) {
-                    Text("Node.js, npm, Git, and Claude Code are included.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Node.js, npm, Git, and Antigravity are included.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(8.dp))
                     DevStack.entries.forEachIndexed { index, stack ->
                         val installed = stack in state.installedDevStacks
@@ -320,6 +321,38 @@ fun SettingsScreen(
             }
 
             item {
+                SettingsAccordion(
+                    title = "Antigravity",
+                    subtitle = when (state.antigravityAuth.status) {
+                        AntigravityAuthStatus.SIGNED_IN ->
+                            state.antigravityAuth.accountEmail ?: "Google account connected"
+                        AntigravityAuthStatus.STARTING, AntigravityAuthStatus.COMPLETING,
+                        AntigravityAuthStatus.AWAITING_CODE -> "Signing in…"
+                        AntigravityAuthStatus.ERROR -> "Connection error"
+                        AntigravityAuthStatus.SIGNED_OUT -> "Not signed in"
+                    },
+                    icon = Icons.Default.SmartToy,
+                    expanded = expanded == SettingsSection.ANTIGRAVITY,
+                    onClick = { toggle(SettingsSection.ANTIGRAVITY) },
+                ) {
+                    AntigravityConnectionSettings(
+                        state = state,
+                        code = antigravityCode,
+                        onCode = { antigravityCode = it },
+                        onStartLogin = onStartAntigravityLogin,
+                        onSubmitCode = {
+                            onSubmitAntigravityCode(antigravityCode)
+                            antigravityCode = ""
+                        },
+                        onLogout = onLogoutAntigravity,
+                        onRefreshModels = onRefreshAntigravityModels,
+                        onSetModel = onSetAntigravityModel,
+                        onSetEffort = onSetAntigravityEffort,
+                    )
+                }
+            }
+
+            item {
                 // Read-only summary: API keys live per-provider in AgentScreen.kt, and
                 // GitHub auth is driven from PocketDevApp.kt's project-import flow —
                 // there's no single "Connections" screen in this app to link to, so
@@ -371,38 +404,6 @@ fun SettingsScreen(
             }
 
             item {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.38f),
-                    border = androidx.compose.foundation.BorderStroke(
-                        1.dp,
-                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                    ),
-                ) {
-                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Shield, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                            Spacer(Modifier.width(10.dp))
-                            Text("Confirm risky commands", Modifier.weight(1f), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                            Switch(
-                                checked = state.confirmRiskyCommands,
-                                onCheckedChange = onSetConfirmRiskyCommands,
-                            )
-                        }
-                        Text(
-                            "rm -rf, sudo, git push and similar commands wait for your approval before Claude Code runs them. " +
-                                "Turning this off returns to running everything automatically. Takes effect the next time the " +
-                                "runtime starts.",
-                            fontSize = 11.5.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(start = 28.dp, top = 2.dp),
-                        )
-                    }
-                }
-            }
-
-            item {
                 SettingsAccordion(
                     title = "Linux runtime",
                     subtitle = "Ubuntu 20.04 PRoot · ARM64",
@@ -416,22 +417,6 @@ fun SettingsScreen(
                         "Active agent",
                         state.agentKind.title + if (state.installedAgentVersions.containsKey(state.agentKind)) "" else " · Not installed",
                     )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                    Text(
-                        "Installed agents",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (state.installedAgentVersions.isEmpty()) {
-                        RuntimeInfoRow("Status", "No verified agent installation")
-                    } else {
-                        AgentKind.entries.forEach { agent ->
-                            state.installedAgentVersions[agent]?.let { version ->
-                                RuntimeInfoRow(agent.title, "v$version")
-                            }
-                        }
-                    }
                     Spacer(Modifier.height(8.dp))
                     OutlinedButton(
                         onClick = { onClearTerminal(); terminalCleared = true },
@@ -485,8 +470,8 @@ fun SettingsScreen(
                         Icon(Icons.Default.Settings, null, Modifier.size(20.dp), tint = PocketOrange)
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Text("Mobile Harness", fontWeight = FontWeight.SemiBold)
-                            Text("Local AI coding workspace", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Colibri Code", fontWeight = FontWeight.SemiBold)
+                            Text("Antigravity coding workspace", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Text("v${BuildConfig.VERSION_NAME}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
