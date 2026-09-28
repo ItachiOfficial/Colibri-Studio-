@@ -46,7 +46,10 @@ enum class ProviderKind(
 
 /**
  * Coding agent engine installed in the private Linux runtime.
- * Each coding agent is installed independently on demand over the shared Core runtime.
+ * Colibri Code only ever uses ANTIGRAVITY. CLAUDE_CODE and DEEPSEEK_HARNESS are
+ * intentionally kept in the enum (many code paths still reference them) but are
+ * never selected: fromStored() always resolves to ANTIGRAVITY. They can be
+ * deleted later, once the compiler confirms nothing references them any more.
  */
 enum class AgentKind(
     val stableId: String,
@@ -75,9 +78,9 @@ enum class AgentKind(
     ;
 
     companion object {
-        fun fromStored(value: String?): AgentKind = entries.firstOrNull {
-            it.stableId == value || it.name == value
-        } ?: CLAUDE_CODE
+        /** Always ANTIGRAVITY: a stale stored value (e.g. "claude-code") must never re-enable another agent. */
+        @Suppress("UNUSED_PARAMETER")
+        fun fromStored(value: String?): AgentKind = ANTIGRAVITY
     }
 }
 
