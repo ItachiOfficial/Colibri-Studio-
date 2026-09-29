@@ -41,6 +41,8 @@ import com.jarves.mh.runtime.ClaudeRuntimeBridge
 import com.jarves.mh.runtime.DshRuntimeBridge
 import com.jarves.mh.runtime.AgentRegistry
 import com.jarves.mh.runtime.AgentUpdateInfo
+import com.jarves.mh.runtime.AntigravityAccount
+import com.jarves.mh.runtime.AntigravityAccountStore
 import com.jarves.mh.runtime.AntigravityAuthController
 import com.jarves.mh.runtime.AntigravityAuthState
 import com.jarves.mh.runtime.AntigravityAuthStatus
@@ -241,6 +243,8 @@ data class AppUiState(
     val antigravityAuth: AntigravityAuthState = AntigravityAuthState(),
     val antigravityModel: String = "",
     val antigravityEffort: String = "high",
+    val antigravityAccounts: List<AntigravityAccount> = emptyList(),
+    val activeAntigravityAccountId: String? = null,
     val antigravityModels: List<String> = emptyList(),
     val antigravityModelsLoading: Boolean = false,
     val androidBuildRunning: Boolean = false,
@@ -293,6 +297,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         .takeIf(String::isNotBlank)
         ?.let(AgentKind::fromStored)
         ?: initialAgentKind
+    private val antigravityAccountStore = AntigravityAccountStore(application)
     private val antigravityAuthController = AntigravityAuthController(
         application,
         preferences.antigravitySignedIn,
@@ -300,7 +305,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     ) { signedIn, email ->
         preferences.antigravitySignedIn = signedIn
         preferences.antigravityAccountEmail = email.orEmpty()
-        if (!signedIn) preferences.clearAgentConversations(AgentKind.ANTIGRAVITY)
+        if (!signedIn) {
+            preferences.clearAgentConversations(AgentKind.ANTIGRAVITY)
+        } else {
+            // Keep this sign-in in reserve so it can be switched back to later without a new
+            // OAuth round-trip. Never blocks or fails the sign-in itself if it can't save.
+            val saved = antigravityAccountStore.saveCurrentAsAccount(email)
+            _state.update { it.copy(antigravityAccounts = antigravityAccountStore.listAccounts()) }
+        }
     }
     private val _state = MutableStateFlow(
         AppUiState(
@@ -318,6 +330,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ),
             antigravityModel = preferences.antigravityModel,
             antigravityEffort = preferences.antigravityEffort,
+            antigravityAccounts = antigravityAccountStore.listAccounts(),
+            activeAntigravityAccountId = antigravityAccountStore.listAccounts()
+                .firstOrNull { it.email == preferences.antigravityAccountEmail }?.id,
             themeMode = runCatching { com.jarves.mh.ui.theme.AppThemeMode.valueOf(preferences.themeMode.uppercase()) }
                 .getOrDefault(com.jarves.mh.ui.theme.AppThemeMode.DARK),
             confirmRiskyCommands = preferences.confirmRiskyCommands,
@@ -1825,6 +1840,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             runCatching { antigravityAuthController.logout() }
                 .onFailure { error -> _state.update { it.copy(toastMessage = error.message ?: "Could not sign out") } }
         }
+    }
+
+    /** Starts a brand-new Google sign-in; the sign-in hook above then saves it as a new reserved account. */
+    fun addAntigravityAccount() = startAntigravityLogin()
+
+    fun switchAntigravityAccount(accountId: String) {
+        if (_state.value.activeAntigravityAccountId == accountId) return
+        if (_state.value.isRunning) {
+            _state.update { it.copy(toastMessage = "Termine la tâche en cours avant de changer de compte.") }
+            return
+        }
+        if (!antigravityAccountStore.switchTo(accountId)) {
+            _state.update { it.copy(toastMessage = "Impossible de basculer vers ce compte.") }
+            return
+        }
+        val account = antigravityAccountStore.listAccounts().firstOrNull { it.id == accountId }
+        preferences.antigravitySignedIn = true
+        preferences.antigravityAccountEmail = account?.email.orEmpty()
+        _state.update {
+            it.copy(
+                activeAntigravityAccountId = accountId,
+                antigravityAuth = it.antigravityAuth.copy(
+                    status = AntigravityAuthStatus.SIGNED_IN,
+                    accountEmail = account?.email,
+                    message = account?.email?.let { e -> "Connected as $e" } ?: "Google account connected",
+                ),
+            )
+        }
+        // NOTE (unverified): if the Antigravity runtime process is already running for the
+        // previous account, it may keep that identity cached in memory until the process is
+        // restarted. Not confirmed against a real device — test with two accounts before
+        // relying on this.
+    }
+
+    fun removeAntigravityAccount(accountId: String) {
+        antigravityAccountStore.removeAccount(accountId)
+        _state.update { it.copy(antigravityAccounts = antigravityAccountStore.listAccounts()) }
     }
 
     fun setAntigravityModel(model: String) {

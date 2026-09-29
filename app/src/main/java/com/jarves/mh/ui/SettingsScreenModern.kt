@@ -29,6 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DarkMode
@@ -143,6 +144,8 @@ fun SettingsScreen(
     onRefreshAntigravityModels: () -> Unit = {},
     onSetAntigravityModel: (String) -> Unit = {},
     onSetAntigravityEffort: (String) -> Unit = {},
+    onAddAntigravityAccount: () -> Unit = {},
+    onSwitchAntigravityAccount: (String) -> Unit = {},
     initialDebugUpdateManifestUrl: String = "",
     onSetDebugUpdateManifestUrl: (String) -> Unit = {},
     onClearDebugUpdateManifestUrl: () -> Unit = {},
@@ -353,6 +356,8 @@ fun SettingsScreen(
                         onRefreshModels = onRefreshAntigravityModels,
                         onSetModel = onSetAntigravityModel,
                         onSetEffort = onSetAntigravityEffort,
+                        onAddAccount = onAddAntigravityAccount,
+                        onSwitchAccount = onSwitchAntigravityAccount,
                     )
                 }
             }
@@ -589,6 +594,8 @@ private fun AntigravityConnectionSettings(
     onRefreshModels: () -> Unit,
     onSetModel: (String) -> Unit,
     onSetEffort: (String) -> Unit,
+    onAddAccount: () -> Unit,
+    onSwitchAccount: (String) -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
     val auth = state.antigravityAuth
@@ -673,6 +680,44 @@ private fun AntigravityConnectionSettings(
                     Text(effort.replaceFirstChar(Char::uppercase))
                 }
             }
+        }
+    }
+
+    if (auth.status == AntigravityAuthStatus.SIGNED_IN) {
+        Text("Comptes Google (rotation)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text(
+            "Le compte actif est utilisé pour chaque appel. Bascule sans repasser par la connexion Google.",
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        state.antigravityAccounts.forEach { account ->
+            val active = account.id == state.activeAntigravityAccountId
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = !active) { onSwitchAccount(account.id) },
+                shape = RoundedCornerShape(11.dp),
+                color = if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        account.email ?: "Compte sans email",
+                        Modifier.weight(1f),
+                        fontSize = 13.sp,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                    )
+                    if (active) SelectionDot(true)
+                }
+            }
+        }
+        OutlinedButton(onClick = onAddAccount, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Default.Add, null, Modifier.size(16.dp))
+            Spacer(Modifier.width(7.dp))
+            Text("Ajouter un compte Google")
         }
     }
 
