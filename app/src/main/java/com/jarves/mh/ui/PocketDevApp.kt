@@ -255,8 +255,8 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val projectsListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
-    // Settings and the project list / import screen are no longer a bottom-nav root:
-    // they open from the chat drawer as full-screen overlays.
+    // Settings and the project list / import screen are no longer bottom-nav roots:
+    // they open from the chat drawer as full-screen overlays, with their own back button.
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showProjects by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(state.activeProject?.id) { showProjects = false }
@@ -374,7 +374,8 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
                     initialDebugUpdateManifestUrl = viewModel.debugUpdateManifestUrl(),
                     onSetDebugUpdateManifestUrl = viewModel::setDebugUpdateManifestUrl,
                     onClearDebugUpdateManifestUrl = viewModel::clearDebugUpdateManifestUrl,
-                )
+                            onBack = { showSettings = false },
+)
         }
         showProjects -> {
             BackHandler { showProjects = false }
@@ -403,7 +404,8 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
                     onPing = viewModel::pingApi,
                     onToggleTheme = viewModel::toggleTheme,
                     onInstallUpdate = viewModel::installAppUpdate,
-                )
+                            onBack = { showProjects = false },
+)
         }
         state.activeProject != null && state.workspaceVisible && state.stitchPreviewOpen -> StitchPreviewScreen(
             preview = state.stitchPreview,
@@ -897,7 +899,7 @@ private fun getDevStackVisuals(stack: DevStack): DevStackVisuals = when (stack) 
 @Composable
 private fun RuntimeSetupPromptScreen(
     selectedStacks: Set<DevStack>,
-    selectedAgent: AgentKind = AgentKind.CLAUDE_CODE,
+    selectedAgent: AgentKind = AgentKind.ANTIGRAVITY,
     themeMode: AppThemeMode = AppThemeMode.DARK,
     onToggleTheme: () -> Unit = {},
     onToggleStack: (DevStack) -> Unit,
@@ -2361,7 +2363,7 @@ private fun QuickTerminalSheet(
 private fun ProviderSetupScreen(
     initial: ProviderProfile,
     onboarding: Boolean,
-    agentKind: AgentKind = AgentKind.CLAUDE_CODE,
+    agentKind: AgentKind = AgentKind.ANTIGRAVITY,
     initialStep: Int = if (onboarding) 0 else 1,
     onBack: (() -> Unit)? = null,
     onSave: (ProviderProfile, String) -> Unit,
@@ -2774,7 +2776,7 @@ private fun ProviderChoiceRow(
 @Composable
 private fun ProviderCredentialsStep(
     provider: ProviderKind,
-    agentKind: AgentKind = AgentKind.CLAUDE_CODE,
+    agentKind: AgentKind = AgentKind.ANTIGRAVITY,
     baseUrl: String,
     model: String,
     dshApi: String = "anthropic-messages",
@@ -3191,6 +3193,7 @@ private fun ProjectsScreen(
     onPing: () -> Unit,
     onToggleTheme: () -> Unit,
     onInstallUpdate: () -> Unit,
+    onBack: () -> Unit = {},
 ) {
     var showCreate by rememberSaveable { mutableStateOf(false) }
     var showUpdateDialog by rememberSaveable { mutableStateOf(false) }
@@ -3215,7 +3218,10 @@ private fun ProjectsScreen(
         topBar = {
             TopAppBar(
                 modifier = Modifier.padding(top = 8.dp),
-                title = { Row(verticalAlignment = Alignment.CenterVertically) { BrandMark(compact = true); Spacer(Modifier.width(9.dp)); Text("Mobile Harness", fontWeight = FontWeight.Bold) } },
+                navigationIcon = {
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+                },
+                title = { Row(verticalAlignment = Alignment.CenterVertically) { BrandMark(compact = true); Spacer(Modifier.width(9.dp)); Text("Colibri Code", fontWeight = FontWeight.Bold) } },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
@@ -3963,8 +3969,6 @@ private fun WorkspaceScreen(
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val drawerScope = rememberCoroutineScope()
     var showExitConfirm by rememberSaveable { mutableStateOf(false) }
-    // Back no longer closes the project (that would land on the launcher branch and reopen it):
-    // it closes the drawer first, then asks before leaving the app.
     BackHandler(onBack = {
         if (drawerState.isOpen) drawerScope.launch { drawerState.close() } else showExitConfirm = true
     })
@@ -4283,9 +4287,9 @@ private fun WorkspaceScreen(
 }
 
 /**
- * Chat drawer: one conversation = one project (see the product decision). Lists the projects
- * newest-first, grouped "today" / "earlier", with entries for the project list + import
- * (ZIP / Git / GitHub) and for Settings.
+ * Chat drawer: one conversation = one project. Lists the projects newest-first, grouped
+ * "today" / "earlier", with entries for the project list + import (ZIP / Git / GitHub) and
+ * for Settings.
  */
 @Composable
 private fun ProjectDrawerContent(
